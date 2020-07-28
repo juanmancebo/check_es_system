@@ -3,7 +3,7 @@
 # Script:       check_es_system.sh                                             #
 # Author:       Claudio Kuenzler www.claudiokuenzler.com                       #
 # Purpose:      Monitor ElasticSearch Store (Disk) Usage                       #
-# Official doc: https://www.claudiokuenzler.com/monitoring-plugins/            #
+# Official doc: www.claudiokuenzler.com/monitoring-plugins/check_es_system.php #
 # License:      GPLv2                                                          #
 # GNU General Public Licence (GPL) http://www.gnu.org/                         #
 # This program is free software; you can redistribute it and/or                #
@@ -14,7 +14,6 @@
 # This program is distributed in the hope that it will be useful,              #
 # but WITHOUT ANY WARRANTY; without even the implied warranty of               #
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the                #
-#                                                                              #
 # GNU General Public License for more details.                                 #
 #                                                                              #
 # You should have received a copy of the GNU General Public License            #
@@ -22,7 +21,8 @@
 #                                                                              #
 # Copyright 2016,2018-2020 Claudio Kuenzler                                    #
 # Copyright 2018 Tomas Barton                                                  #
-# Copyright 2020 NotAProfessionalDeveloper
+# Copyright 2020 NotAProfessionalDeveloper                                     #
+# Copyright 2020 tatref                                                        #
 #                                                                              #
 # History:                                                                     #
 # 20160429: Started programming plugin                                         #
@@ -49,6 +49,8 @@
 # 20200401: Fix/handle 503 errors with curl exit code 0 (issue #20)            #
 # 20200409: Fix 503 error lookup (issue #22)                                   #
 # 20200430: Support both jshon and jq as json parsers (issue #18)              #
+# 20200609: Fix readonly check on ALL indices (issue #26)                      #
+# 20200723: Add cluster name to status output                                  #
 ################################################################################
 #Variables and defaults
 STATE_OK=0              # define the exit code if status is OK
@@ -56,7 +58,7 @@ STATE_WARNING=1         # define the exit code if status is Warning
 STATE_CRITICAL=2        # define the exit code if status is Critical
 STATE_UNKNOWN=3         # define the exit code if status is Unknown
 export PATH=$PATH:/usr/local/bin:/usr/bin:/bin # Set path
-version=1.8.0
+version=1.9.0
 port=9200
 httpscheme=http
 unit=G
@@ -77,7 +79,7 @@ Options:
       -S Use https
       -u Username if authentication is required
       -p Password if authentication is required
-   *  -t Type of check (disk, mem, status, readonly, readonlyallowdelete, jthreads, tps, master)
+   *  -t Type of check (disk, mem, status, readonly, jthreads, tps, master)
    +  -d Available size of disk or memory (ex. 20)
       -o Disk space unit (K|M|G) (defaults to G)
       -i Space separated list of indexes to be checked for readonly (default: '_all')
@@ -140,14 +142,15 @@ if [ -z $critical ] || [ "${critical}" = "" ]; then critical=95; fi
 }
 
 json_parse() {
-  json_parse_usage() { echo "$0: [-r] [-q] [-a] -x arg1 -x arg2 ..." 1>&2; exit; }
+  json_parse_usage() { echo "$0: [-r] [-q] [-c] [-a] -x arg1 -x arg2 ..." 1>&2; exit; }
 
-  local OPTIND opt r q a x
-  while getopts ":rqax:" opt
+  local OPTIND opt r q c a x
+  while getopts ":rqcax:" opt
   do
     case "${opt}" in
     r)  raw=1;;
     q)  quiet=1;; # only required for jshon
+    c)  continue=1;; # only required for jshon
     a)  across=1;;
     x)  args+=("$OPTARG");;
     *)  json_parse_usage;;
@@ -160,7 +163,7 @@ json_parse() {
     for arg in "${args[@]}"; do
       cmd+=(-e $arg)
     done
-    jshon ${quiet:+-Q} ${across:+-a} "${cmd[@]}" ${raw:+-u} 
+    jshon ${quiet:+-Q} ${continue:+-C} ${across:+-a} "${cmd[@]}" ${raw:+-u}
     ;;
   jq)
     cmd=()
@@ -170,57 +173,6 @@ json_parse() {
     jq ${raw:+-r} $(IFS=; echo ${across:+.[]}"${cmd[*]}")
     ;;
   esac
-}
-
-index_check_blocks() {
-  check=${1}
-  icount=0
-  for index in $indexes; do
-    if [[ -z $user ]]; then
-      # Without authentication
-      settings=$(curl -k -s --max-time ${max_time} ${httpscheme}://${host}:${port}/$index/_settings)
-      if [[ $? -eq 7 ]]; then
-        echo "ES SYSTEM CRITICAL - Failed to connect to ${host} port ${port}: Connection refused"
-        exit $STATE_CRITICAL
-      elif [[ $? -eq 28 ]]; then
-        echo "ES SYSTEM CRITICAL - server did not respond within ${max_time} seconds"
-        exit $STATE_CRITICAL
-      fi
-      rocount=$(echo $settings | json_parse -r -q -a -x settings -x index -x blocks -x ${check} | grep -c true)
-      if [[ $rocount -gt 0 ]]; then
-        output[${icount}]="Elasticsearch Index $index is ${check} (found $rocount index(es) set to ${check})"
-        roerror=true
-      fi
-    fi
-
-    if [[ -n $user ]] || [[ -n $(echo $esstatus | grep -i authentication) ]] ; then
-      # Authentication required
-      authlogic
-      settings=$(curl -k -s --max-time ${max_time} --basic -u ${user}:${pass} ${httpscheme}://${host}:${port}/$index/_settings)
-      settingsrc=$?
-      if [[ $settingsrc -eq 7 ]]; then
-        echo "ES SYSTEM CRITICAL - Failed to connect to ${host} port ${port}: Connection refused"
-        exit $STATE_CRITICAL
-      elif [[ $settingsrc -eq 28 ]]; then
-        echo "ES SYSTEM CRITICAL - server did not respond within ${max_time} seconds"
-        exit $STATE_CRITICAL
-      elif [[ -n $(echo $esstatus | grep -i "unable to authenticate") ]]; then
-        echo "ES SYSTEM CRITICAL - Unable to authenticate user $user for REST request"
-        exit $STATE_CRITICAL
-      elif [[ -n $(echo $esstatus | grep -i "unauthorized") ]]; then
-        echo "ES SYSTEM CRITICAL - User $user is unauthorized"
-        exit $STATE_CRITICAL
-      fi
-      rocount=$(echo $settings | json_parse -r -q -a -x settings -x index -x blocks -x ${check} | grep -c true)
-      if [[ $rocount -gt 0 ]]; then
-        output[${icount}]="Elasticsearch Index $index is ${check} (found $rocount index(es) set to ${check})"
-        roerror=true
-      fi
-    fi
-    let icount++
-  done
-  
-
 }
 
 ################################################################################
@@ -332,6 +284,9 @@ if [[ -n $user ]] || [[ -n $(echo $esstatus | grep -i authentication) ]] ; then
       exit $STATE_CRITICAL
     fi
   fi
+  # max shards per node (pending to adapt to json_parse and envrionments withouth authentication)
+  cluster_settings=$(curl -k -s --max-time ${max_time} --basic -u ${user}:${pass} "${httpscheme}://${host}:${port}/_cluster/settings?include_defaults&flat_settings&local&filter_path=defaults.cluster*")
+  max_shards_per_node=$(echo $cluster_settings |jq -j '.defaults."cluster.max_shards_per_node"')
 fi
 
 # Catch empty reply from server (typically happens when ssl port used with http connection)
@@ -398,6 +353,7 @@ mem) # Check memory usage
 status) # Check Elasticsearch status
   getstatus
   status=$(echo $esstatus | json_parse -r -x status)
+  clustername=$(echo $esstatus | json_parse -r -x cluster_name)
   shards=$(echo $esstatus | json_parse -r -x indices -x shards -x total)
   docs=$(echo $esstatus | json_parse -r -x indices -x docs -x count)
   nodest=$(echo $esstatus | json_parse -r -x nodes -x count -x total)
@@ -405,31 +361,85 @@ status) # Check Elasticsearch status
   relocating=$(echo $eshealth | json_parse -r -x relocating_shards)
   init=$(echo $eshealth | json_parse -r -x initializing_shards)
   unass=$(echo $eshealth | json_parse -r -x unassigned_shards)
-  if [ "$status" = "green" ]; then
-    echo "ES SYSTEM OK - Elasticsearch Cluster is green (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
-    exit $STATE_OK
-  elif [ "$status" = "yellow" ]; then
-    echo "ES SYSTEM WARNING - Elasticsearch Cluster is yellow (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${relocating} relocating shards, ${init} initializing shards, ${unass} unassigned shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
-      exit $STATE_WARNING
-  elif [ "$status" = "red" ]; then
-    echo "ES SYSTEM CRITICAL - Elasticsearch Cluster is red (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${relocating} relocating shards, ${init} initializing shards, ${unass} unassigned shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
+
+  shards_available=$(( ${max_shards_per_node} * ${nodesd} ))
+  shards_warning=$(( ${shards_available} * 80/100 ))
+  shards_critical=$(( ${shards_available} * 95/100 ))
+  if [ "$status" = "yellow" ] || [ ${shards} -ge ${shards_warning} ] || [ ${shards} -lt ${shards_critical} ] ; then
+    echo "ES SYSTEM WARNING - Elasticsearch Cluster \"$clustername\" is green (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
+    exit $STATE_WARNING
+  elif [ "$status" = "red" ] || [ ${shards} -ge ${shards_critical} ] ; then
+    echo "ES SYSTEM CRITICAL - Elasticsearch Cluster \"$clustername\" is yellow (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${relocating} relocating shards, ${init} initializing shards, ${unass} unassigned shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
       exit $STATE_CRITICAL
+  elif [ "$status" = "green" ] || [ ${shards} -lt ${shards_warning} ]; then
+    echo "ES SYSTEM OK - Elasticsearch Cluster \"$clustername\" is red (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${relocating} relocating shards, ${init} initializing shards, ${unass} unassigned shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
+      exit $STATE_OK
   fi
   ;;
 
 readonly) # Check Readonly status on given indexes
-  index_check_blocks read_only
-  if [[ $roerror ]]; then
-    echo "ES SYSTEM CRITICAL - ${output[*]}"
-    exit $STATE_CRITICAL
-  else
-    echo "ES SYSTEM OK - Elasticsearch Indexes ($indexes) are writeable"
-    exit $STATE_OK
-  fi
-  ;;
+  icount=0
+  for index in $indexes; do
+    if [[ -z $user ]]; then
+      # Without authentication
+      settings=$(curl -k -s --max-time ${max_time} ${httpscheme}://${host}:${port}/$index/_settings)
+      if [[ $? -eq 7 ]]; then
+        echo "ES SYSTEM CRITICAL - Failed to connect to ${host} port ${port}: Connection refused"
+        exit $STATE_CRITICAL
+      elif [[ $? -eq 28 ]]; then
+        echo "ES SYSTEM CRITICAL - server did not respond within ${max_time} seconds"
+        exit $STATE_CRITICAL
+      fi
+      rocount=$(echo $settings | json_parse -r -q -c -a -x settings -x index -x blocks -x read_only | grep -c true)
+      roadcount=$(echo $settings | json_parse -r -q -c -a -x settings -x index -x blocks -x read_only_allow_delete | grep -c true)
+      if [[ $rocount -gt 0 ]]; then
+        output[${icount}]=" $index is read-only -"
+        roerror=true
+      fi
+      if [[ $roadcount -gt 0 ]]; then
+        output[${icount}]+=" $index is read-only (allow delete) -"
+        roerror=true
+      fi
+    fi
 
-readonlyallowdelete) # Check Readonly allow delete status on given indexes
-  index_check_blocks read_only_allow_delete
+    if [[ -n $user ]] || [[ -n $(echo $esstatus | grep -i authentication) ]] ; then
+      # Authentication required
+      authlogic
+      settings=$(curl -k -s --max-time ${max_time} --basic -u ${user}:${pass} ${httpscheme}://${host}:${port}/$index/_settings)
+      settingsrc=$?
+      if [[ $settingsrc -eq 7 ]]; then
+        echo "ES SYSTEM CRITICAL - Failed to connect to ${host} port ${port}: Connection refused"
+        exit $STATE_CRITICAL
+      elif [[ $settingsrc -eq 28 ]]; then
+        echo "ES SYSTEM CRITICAL - server did not respond within ${max_time} seconds"
+        exit $STATE_CRITICAL
+      elif [[ -n $(echo $esstatus | grep -i "unable to authenticate") ]]; then
+        echo "ES SYSTEM CRITICAL - Unable to authenticate user $user for REST request"
+        exit $STATE_CRITICAL
+      elif [[ -n $(echo $esstatus | grep -i "unauthorized") ]]; then
+        echo "ES SYSTEM CRITICAL - User $user is unauthorized"
+        exit $STATE_CRITICAL
+      fi
+      rocount=$(echo $settings | json_parse -r -q -c -a -x settings -x index -x blocks -x read_only | grep -c true)
+      roadcount=$(echo $settings | json_parse -r -q -c -a -x settings -x index -x blocks -x read_only_allow_delete | grep -c true)
+      if [[ $rocount -gt 0 ]]; then
+        if [[ "$index" = "_all" ]]; then 
+          output[${icount}]=" $rocount index(es) found read-only -"
+        else output[${icount}]=" $index is read-only -"
+        fi
+        roerror=true
+      fi
+      if [[ $roadcount -gt 0 ]]; then
+        if [[ "$index" = "_all" ]]; then 
+          output[${icount}]+=" $rocount index(es) found read-only (allow delete) -"
+        else output[${icount}]+=" $index is read-only (allow delete) -"
+        fi
+        roerror=true
+      fi
+    fi
+    let icount++
+  done
+
   if [[ $roerror ]]; then
     echo "ES SYSTEM CRITICAL - ${output[*]}"
     exit $STATE_CRITICAL
