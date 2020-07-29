@@ -365,7 +365,7 @@ status) # Check Elasticsearch status
   shards_available=$(( ${max_shards_per_node} * ${nodesd} ))
   shards_warning=$(( ${shards_available} * 80/100 ))
   shards_critical=$(( ${shards_available} * 95/100 ))
-  if [ "$status" = "yellow" ] || [ ${shards} -ge ${shards_warning} ] || [ ${shards} -lt ${shards_critical} ] ; then
+  if [ "$status" = "yellow" ] || [ ${shards} -ge ${shards_warning} ] && [ ${shards} -lt ${shards_critical} ] ; then
     echo "ES SYSTEM WARNING - Elasticsearch Cluster \"$clustername\" is green (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
     exit $STATE_WARNING
   elif [ "$status" = "red" ] || [ ${shards} -ge ${shards_critical} ] ; then
