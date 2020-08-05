@@ -371,7 +371,7 @@ status) # Check Elasticsearch status
   elif [ "$status" = "red" ] || [ ${shards} -ge ${shards_critical} ] ; then
     echo "ES SYSTEM CRITICAL - Elasticsearch Cluster \"$clustername\" is $status (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${relocating} relocating shards, ${init} initializing shards, ${unass} unassigned shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
       exit $STATE_CRITICAL
-  elif [ "$status" = "green" ] || [ ${shards} -lt ${shards_warning} ]; then
+  elif [ "$status" = "green" ] ; then
     echo "ES SYSTEM OK - Elasticsearch Cluster \"$clustername\" is $status (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${relocating} relocating shards, ${init} initializing shards, ${unass} unassigned shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
       exit $STATE_OK
   fi
