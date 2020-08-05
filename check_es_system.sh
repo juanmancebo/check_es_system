@@ -366,13 +366,13 @@ status) # Check Elasticsearch status
   shards_warning=$(( ${shards_available} * 80/100 ))
   shards_critical=$(( ${shards_available} * 95/100 ))
   if [ "$status" = "yellow" ] || [ ${shards} -ge ${shards_warning} ] && [ ${shards} -lt ${shards_critical} ] ; then
-    echo "ES SYSTEM WARNING - Elasticsearch Cluster \"$clustername\" is green (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
+    echo "ES SYSTEM WARNING - Elasticsearch Cluster \"$clustername\" is $status (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
     exit $STATE_WARNING
   elif [ "$status" = "red" ] || [ ${shards} -ge ${shards_critical} ] ; then
-    echo "ES SYSTEM CRITICAL - Elasticsearch Cluster \"$clustername\" is yellow (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${relocating} relocating shards, ${init} initializing shards, ${unass} unassigned shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
+    echo "ES SYSTEM CRITICAL - Elasticsearch Cluster \"$clustername\" is $status (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${relocating} relocating shards, ${init} initializing shards, ${unass} unassigned shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
       exit $STATE_CRITICAL
   elif [ "$status" = "green" ] || [ ${shards} -lt ${shards_warning} ]; then
-    echo "ES SYSTEM OK - Elasticsearch Cluster \"$clustername\" is red (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${relocating} relocating shards, ${init} initializing shards, ${unass} unassigned shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
+    echo "ES SYSTEM OK - Elasticsearch Cluster \"$clustername\" is $status (${nodest} nodes, ${nodesd} data nodes, ${shards} shards, ${relocating} relocating shards, ${init} initializing shards, ${unass} unassigned shards, ${docs} docs)|total_nodes=${nodest};;;; data_nodes=${nodesd};;;; total_shards=${shards};;;; relocating_shards=${relocating};;;; initializing_shards=${init};;;; unassigned_shards=${unass};;;; docs=${docs};;;;"
       exit $STATE_OK
   fi
   ;;
