@@ -253,6 +253,10 @@ if [[ -z $user ]]; then
       exit $STATE_CRITICAL
     fi
   fi
+  # max shards per node (pending to adapt to json_parse and envrionments withouth authentication)
+  cluster_settings=$(curl -k -s --max-time ${max_time} "${httpscheme}://${host}:${port}/_cluster/settings?include_defaults&flat_settings&local&filter_path=defaults.cluster*")
+  max_shards_per_node=$(echo $cluster_settings |jq -j '.defaults."cluster.max_shards_per_node"')
+
 fi
 
 if [[ -n $user ]] || [[ -n $(echo $esstatus | grep -i authentication) ]] ; then
